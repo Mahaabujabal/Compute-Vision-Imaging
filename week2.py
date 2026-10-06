@@ -1,54 +1,97 @@
-# Step 1: Data Loading & Initial Exploration
+import os
+import cv2
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from sklearn.datasets import load_wine
-
-# تحميل مجموعة بيانات حقيقية مباشرة (Wine Dataset)
-wine_data = load_wine()
-df = pd.DataFrame(data=wine_data.data, columns=wine_data.feature_names)
-df["target"] = wine_data.target
-
-print(df.info())  # فحص أنواع البيانات والشواغر
-print(df.describe())  # الملخص الإحصائي
+import torch
+import torch.nn as nn
+import torchvision.transforms as transforms
 
 
-# Step 2: Data Preprocessing & Cleaning
-# 1. التعامل مع القيم المفقودة (إن وجدت)
-df.dropna(inplace=True)
+#trainig on a photo of My baby boy Leo
+desktop_path = os.path.expanduser("~/Desktop")
+image_path = os.path.join(desktop_path, "Leo.JPG")
 
-# 2. فصل الميزات عن الهدف
-X = df.drop("target", axis=1)
-y = df["target"]
+# قراءة الصورة باستخدام OpenCV
+img = cv2.imread(image_path)
+
+if img is None:
+    raise FileNotFoundError(
+      
+    )
+
+# تحويل نظام الألوان من BGR الخاص بـ OpenCV إلى RGB
+img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
-# Step 3: Train-Test Split & Feature Scaling
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-
-# تقسيم البيانات إلى 80% تدريب و 20% اختبار
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+# Preprocessing Pipeline
+transform = transforms.Compose(
+    [
+        transforms.ToPILImage(),
+        transforms.Resize((32, 32)),  # تغيير الحجم لتناسب شبكة CNN
+        transforms.ToTensor(),  # تحويل قيم البكسلات إلى Tensor بين [0, 1]
+    ]
 )
 
-# تطبيق StandardScaler لمنع تحيز الأرقام الكبيرة
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+# تطبيق التغييرات وإضافة بُعد الدفعة (Batch Dimension) -> (1, 3, 32, 32)
+input_tensor = transform(img_rgb).unsqueeze(0)
 
 
-# Step 4: Model Training & Evaluation
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, log_loss
 
-# تدريب النموذج
-model = LogisticRegression(max_iter=1000)
-model.fit(X_train_scaled, y_train)
+# 3 Building (CNN Architecture)
 
-# التنبؤ والتقييم
-y_pred = model.predict(X_test_scaled)
-y_proba = model.predict_proba(X_test_scaled)
+class LeoClassifierCNN(nn.Module):
 
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print("Log Loss:", log_loss(y_test, y_proba))  # تقييم دقة الاحتمالات
+    def __init__(self, num_classes=2):  # 0 = Cat, 1 = Other
+        super(LeoClassifierCNN, self).__init__()
+
+        # طبقات استخراج الخصائص (Feature Extraction)
+        self.features = nn.Sequential(
+            nn.Conv2d(
+                in_channels=3,
+                out_channels=16,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # (32x32 -> 16x16)
+            nn.Conv2d(
+                in_channels=16,
+                out_channels=32,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # (16x16 -> 8x8) #usually it is max pooling 
+        )
+
+        # طبقة التصنيف النهائية (Classification Head)
+        self.classifier = nn.Linear(32 * 8 * 8, num_classes)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = torch.flatten(x, 1)  # تسطيح الـ Feature Maps إلى متجه 1D
+        logits = self.classifier(x)
+        return logits
+
+
+
+# 4. تشغيل الصورة داخل النموذج وعرض النتائج
+
+model = LeoClassifierCNN(num_classes=2)
+model.eval()  # وضع النموذج في حالة التقييم
+
+with torch.no_grad():
+    output_scores = model(input_tensor)
+    probabilities = torch.softmax(output_scores, dim=1)
+
+print(f"صورة القط Leo تم قراءتها بنجاح من سطح المكتب!")
+print("أبعاد الـ Tensor المدخل للشبكة:", input_tensor.shape)
+print("قيم الـ Logits الناتجة:", output_scores.numpy())
+print("احتماليات الـ Softmax:", probabilities.numpy())
+
+# عرض صورة Leo
+plt.imshow(img_rgb)
+plt.title("Leo the Cat")
+plt.axis("off")
+plt.show()
